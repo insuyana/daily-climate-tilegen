@@ -180,19 +180,26 @@ class Era5EdhSource(DataSource):
         y = granule.dates[0].year
         tag = "" if self.area is None else "_" + "_".join(str(int(x)) for x in self.area)
         target = self.workdir / f"edh_{v}_{y}{tag}.nc"
-        if not target.exists():
-            if kind == "daily":
-                da = self._read_daily(granule, evar)
-            else:
-                da = self._read_hourly(granule, evar, stat)
-            tmp = target.with_suffix(".part.nc")
-            with nc_lock:
-                da.to_netcdf(tmp)
-            tmp.rename(target)
-
         import xarray as xr
 
         wanted = set(granule.dates)
+        have = set()
+        if target.exists():
+            with nc_lock, xr.open_dataset(target) as ds:
+                have = {t.astype("datetime64[D]").astype(object) for t in ds["time"].values}
+        # Mismo cuidado que en era5.py: un archivo que quedó de una corrida
+        # anterior (con --keep-local) puede no tener los días nuevos -> releer.
+        if not wanted <= have:
+            g = Granule(granule.key, v, sorted(wanted | have))
+            if kind == "daily":
+                da = self._read_daily(g, evar)
+            else:
+                da = self._read_hourly(g, evar, stat)
+            tmp = target.with_suffix(".part.nc")
+            with nc_lock:
+                da.to_netcdf(tmp)
+            tmp.replace(target)
+
         assets = []
         with nc_lock, xr.open_dataset(target) as ds:
             for i, t in enumerate(ds["time"].values):

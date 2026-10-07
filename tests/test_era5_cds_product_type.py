@@ -103,8 +103,9 @@ def test_el_resto_del_pedido_no_cambia(tmp_path, pedido):
 
 def test_el_cache_no_se_pisa_entre_datasets(tmp_path, pedido):
     """era5 y era5-land comparten workdir; el nombre lleva el dataset."""
-    uno = _fetch(SINGLE, tmp_path, pedido)["target"]
-    otro = _fetch(LAND, tmp_path, pedido)["target"]
+    # se baja a un .part.nc y después se renombra: comparar sin el .part
+    uno = _fetch(SINGLE, tmp_path, pedido)["target"].replace(".part", "")
+    otro = _fetch(LAND, tmp_path, pedido)["target"].replace(".part", "")
     assert uno != otro
     assert uno.endswith("era5_snowc_mean_202507.nc")
     assert otro.endswith("era5-land_snowc_mean_202507.nc")

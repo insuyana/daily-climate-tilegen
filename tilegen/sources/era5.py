@@ -26,12 +26,27 @@ from __future__ import annotations
 
 import logging
 import shutil
+import threading
 import zipfile
 
-from ..utils import month_groups
+from ..utils import month_groups, nc_lock
 from .base import Asset, DataSource, Granule
 
 log = logging.getLogger("tilegen.era5")
+
+# Días pedidos al CDS en este proceso, por archivo. Compartido entre escenas
+# (cada una tiene su instancia del source) porque con cds_fetch_area todas
+# apuntan al mismo archivo.
+_pedidos: dict = {}
+_cache_lock = threading.Lock()
+
+
+def _dates_in(path):
+    import xarray as xr
+
+    with nc_lock, xr.open_dataset(path) as ds:
+        tdim = "valid_time" if "valid_time" in ds else "time"
+        return {t.astype("datetime64[D]").astype(object) for t in ds[tdim].values}
 
 
 def _ensure_netcdf(path):
@@ -70,38 +85,56 @@ class Era5CdsSource(DataSource):
         return out
 
     def fetch(self, granule):
-        import cdsapi
-
         v = granule.variable
-        vcfg = self.cfg.variables[v]
         y, m = granule.dates[0].year, granule.dates[0].month
         area = self.fetch_area
         # el tag lleva la ventana -> con cds_fetch_area todas las escenas apuntan
         # al MISMO archivo, así que la primera lo baja y el resto lo cachea.
         tag = "" if area is None else "_" + "_".join(str(int(x)) for x in area)
         target = self.workdir / f"{self.cfg.name}_{v}_{y}{m:02d}{tag}.nc"
-        if not target.exists():
-            request = {
-                "variable": [vcfg.cds_variable],
-                "daily_statistic": vcfg.daily_statistic,
-                "time_zone": "utc+00:00",
-                "frequency": "1_hourly",
-                "year": [str(y)],
-                "month": [f"{m:02d}"],
-                "day": [f"{d.day:02d}" for d in granule.dates],
-            }
-            # product_type sale del YAML en vez de estar fijo acá: sólo el derived
-            # de single-levels lo tiene (ahí hay ensemble además de reanalysis).
-            # El de ERA5-Land no publica ese campo, y mandarlo rompe el pedido.
-            if getattr(self.cfg, "cds_product_type", None):
-                request["product_type"] = self.cfg.cds_product_type
-            if area is not None:
-                minx, miny, maxx, maxy = area
-                request["area"] = [maxy, minx, miny, maxx]  # N, W, S, E
-            log.info("CDS request %s (may sit in the queue for a while)", granule.key)
-            cdsapi.Client(quiet=True).retrieve(self.cfg.cds_dataset, request, str(target))
-            _ensure_netcdf(target)
+        wanted = set(granule.dates)
+        with _cache_lock:
+            have = _dates_in(target) if target.exists() else set()
+            asked = _pedidos.get(target, set())
+            # Re-bajar si al archivo le faltan días, salvo que ya se hayan pedido
+            # en ESTA corrida (el CDS no los tiene todavía: no insistir con cada
+            # escena). Antes el primer archivo del mes se reusaba para siempre y
+            # el mes en curso quedaba congelado en los días de esa primera bajada.
+            if not wanted <= have and not wanted <= asked:
+                days = sorted(wanted | have | asked)
+                self._retrieve(v, y, m, days, area, target)
+                _pedidos[target] = set(days)
         return self._assets(granule, target)
+
+    def _retrieve(self, v, y, m, days, area, target):
+        import cdsapi
+
+        vcfg = self.cfg.variables[v]
+        request = {
+            "variable": [vcfg.cds_variable],
+            "daily_statistic": vcfg.daily_statistic,
+            "time_zone": "utc+00:00",
+            "frequency": "1_hourly",
+            "year": [str(y)],
+            "month": [f"{m:02d}"],
+            "day": [f"{d.day:02d}" for d in days],
+        }
+        # product_type sale del YAML en vez de estar fijo acá: sólo el derived
+        # de single-levels lo tiene (ahí hay ensemble además de reanalysis).
+        # El de ERA5-Land no publica ese campo, y mandarlo rompe el pedido.
+        if getattr(self.cfg, "cds_product_type", None):
+            request["product_type"] = self.cfg.cds_product_type
+        if area is not None:
+            minx, miny, maxx, maxy = area
+            request["area"] = [maxy, minx, miny, maxx]  # N, W, S, E
+        log.info("CDS request %s %d-%02d, %d day(s) (may sit in the queue for a while)",
+                 v, y, m, len(days))
+        # a un temporal y después rename: si el pedido se corta, el archivo
+        # bueno anterior sigue en su lugar
+        tmp = target.with_suffix(".part.nc")
+        cdsapi.Client(quiet=True).retrieve(self.cfg.cds_dataset, request, str(tmp))
+        _ensure_netcdf(tmp)
+        tmp.replace(target)
 
     def _assets(self, granule, target):
         import xarray as xr
