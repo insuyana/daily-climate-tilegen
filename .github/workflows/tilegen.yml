@@ -13,8 +13,12 @@
 # Qué código corre: el tag de la variable TILEGEN_REF (p.ej. v0.5.0), igual que
 # prod-run.sh solo corría código tageado. Sin la variable, corre main.
 #
+# Acceso a S3: sin claves guardadas. AWS le da permiso a ESTE repo por nombre
+# (OIDC) y el job asume el rol de la variable AWS_ROLE_ARN. Escribe en el
+# bucket de la variable TILEGEN_BUCKET (por defecto suyana-dev-tiles, la
+# cuenta nueva, donde no se puede borrar nada).
+#
 # Secretos que necesita:
-#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY   usuario IAM github-tilegen (S3)
 #   CDSAPIRC   contenido entero de ~/.cdsapirc  (era5, era5-land)
 #   NETRC      contenido entero de ~/.netrc     (EDH, Earthdata)
 #   CLICKUP_TOKEN                               aviso de fallas (opcional)
@@ -44,9 +48,14 @@ on:
         options: [cpc, chirps, era5-1, era5-2, era5-3, era5-swvl1, chirps-v3,
                   era5-land, cobertura, rechunk-era5, rechunk-chirps,
                   rechunk-chirts, rechunk-chirps-v3, rechunk-cfs]
+      escenas:
+        description: Solo estas escenas, separadas por espacio (vacío = las de siempre)
+        type: string
+        required: false
 
 permissions:
   contents: read
+  id-token: write   # para que AWS reconozca al repo (OIDC)
 
 jobs:
   plan:
@@ -100,14 +109,19 @@ jobs:
     env:
       JOB: ${{ needs.plan.outputs.job }}
       TILEGEN_WORKDIR: ${{ github.workspace }}/../work
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TILEGEN_BUCKET: ${{ vars.TILEGEN_BUCKET || 'suyana-dev-tiles' }}
+      ESCENAS: ${{ inputs.escenas }}
       AWS_DEFAULT_REGION: us-east-1
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ vars.TILEGEN_REF || github.ref }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
 
       - uses: actions/setup-python@v6
         with:
@@ -136,6 +150,8 @@ jobs:
             peru bolivia brasil_amazonia brasil_nordeste brasil_centro_sudeste
             brasil_sur paraguay uruguay chile_norte_centro argentina_norte patagonia"
           TODAS="$TIERRA nino34"
+          # Prueba a mano sobre pocas escenas: reemplaza las dos listas.
+          if [ -n "$ESCENAS" ]; then TIERRA="$ESCENAS"; TODAS="$ESCENAS"; fi
           x() { for e in "$@"; do printf -- '-x %s ' "$e"; done; }
           desde() { echo "-s $(date -u -d "-$1 days" +%F)"; }
           ERA5_VARS="-v t2m_mean -v t2m_max -v t2m_min -v precip_sum -v ssrd_sum -v sd_mean -v rsn_mean -v fg10_max"

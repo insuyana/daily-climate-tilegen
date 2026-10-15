@@ -115,6 +115,12 @@ def load_global(config_dir: Path) -> GlobalCfg:
     # no existe, así que la imagen lo redirige con esta variable.
     if os.environ.get("TILEGEN_WORKDIR"):
         cfg.runtime.workdir = Path(os.environ["TILEGEN_WORKDIR"])
+    # Mientras dura la migración a la cuenta nueva (suyana-tiles ->
+    # suyana-dev-tiles) el bucket se elige desde afuera, sin tocar el YAML.
+    # Las credenciales también vienen del entorno (AWS_PROFILE en el server,
+    # el rol de GitHub en Actions).
+    if os.environ.get("TILEGEN_BUCKET"):
+        cfg.s3.bucket = os.environ["TILEGEN_BUCKET"]
     return cfg
 
 
