@@ -1,6 +1,6 @@
 # Catálogo de datos climáticos — `s3://suyana-tiles`
 
-_Generado 2026-09-21. Cobertura leída de los ledgers reales en S3 (no sólo de la config)._
+_Generado 2026-10-14. Cobertura leída de los ledgers reales en S3 (no sólo de la config)._
 
 Todos los datasets son **Zarr diarios** sobre EPSG:4326, partidos por escena (zona geográfica). Detalle completo por escena en [`catalog.csv`](catalog.csv) y [`catalog.yaml`](catalog.yaml).
 
@@ -17,18 +17,26 @@ ds["t2m_mean"].sel(time="2024-01-15").plot()
 | Dataset | Versión | Resolución | Rango con datos | Variables | Escenas |
 |---|---|---|---|---|---|
 | **cfs** | operational-analysis | 0.204° | 2011-04-01 → 2026-03-31 | `tmp2m`, `u10m`, `v10m` | 1 |
-| **chirps** | v2.0 | 0.05° | 1981-01-01 → 2026-08-07 | `precip` | 20 |
-| **chirps-v3** | v3.0 | 0.05° | 1981-01-01 → 2026-08-07 | `precip_rnl`, `precip_sat` | 20 |
+| **cfsr** | reanalysis | 0.312° | 1979-01-01 → 2010-12-31 | `u10m`, `v10m` | 1 |
+| **chirps** | v2.0 | 0.05° | 1981-01-01 → 2026-08-30 | `precip` | 20 |
+| **chirps-v3** | v3.0 | 0.05° | 1981-01-01 → 2026-08-30 | `precip_rnl`, `precip_sat` | 20 |
 | **chirts** | v1.0 | 0.05° | 1983-01-01 → 2016-12-31 | `tmax`, `tmin` | 20 |
-| **cpc** | v1.0 | 0.5° | 1979-01-01 → 2026-09-18 | `tmax`, `tmin` | 20 |
-| **era5** | daily-stats | 0.25° | 1981-01-01 → 2026-09-01 | `t2m_mean`, `t2m_max`, `t2m_min`, `precip_sum`, `ssrd_sum`, `fg10_max`, `swvl1`, `sd_mean`, `rsn_mean` | 21 |
-| **era5-land** | daily-stats | 0.1° | 1981-01-01 → 2026-09-15 | `snowc_mean` | 20 |
+| **cpc** | v1.0 | 0.5° | 1979-01-01 → 2026-10-11 | `tmax`, `tmin` | 20 |
+| **era5** | daily-stats | 0.25° | 1981-01-01 → 2026-10-08 | `t2m_mean`, `t2m_max`, `t2m_min`, `precip_sum`, `ssrd_sum`, `fg10_max`, `swvl1`, `sd_mean`, `rsn_mean` | 21 |
+| **era5-land** | daily-stats | 0.1° | 1981-01-01 → 2026-10-08 | `snowc_mean`, `swvl1` | 20 |
 
 ### cfs — CFS operational analysis (CFSv2), ~0.2° global (NOAA NCEI). Media diaria del análisis 6-horario (step=0). tmp2m + viento en componentes separadas u10m/v10m.
 
 - **Fuente:** `cfs_ncei` · **Resolución:** 0.204° · **Rango configurado:** 2011-04-01 -> hoy
 - **Variables:** `tmp2m` (K), `u10m` (m s-1), `v10m` (m s-1)
 - **Ruta S3:** `s3://suyana-tiles/cfs/operational-analysis/<scene>.zarr`
+- **Escenas con datos (1):** bolivia
+
+### cfsr — CFSR (Climate Forecast System Reanalysis), ~0.31° global (NCAR GDEX, series horarias d093001). Media diaria sobre las 24 horas del día (ventana 01:00 D .. 00:00 D+1 UTC). Es el histórico 1979–2010 que precede al operational analysis del dataset cfs (2011+, ~0.20°) — grillas distintas, por eso son datasets separados.
+
+- **Fuente:** `cfsr_gdex` · **Resolución:** 0.312° · **Rango configurado:** 1979-01-01 -> 2010-12-31
+- **Variables:** `u10m` (m s-1), `v10m` (m s-1)
+- **Ruta S3:** `s3://suyana-tiles/cfsr/reanalysis/<scene>.zarr`
 - **Escenas con datos (1):** bolivia
 
 ### chirps — CHIRPS v2.0 — global daily precipitation, 0.05°, 50S–50N (UCSB CHC)
@@ -69,7 +77,7 @@ ds["t2m_mean"].sel(time="2024-01-15").plot()
 ### era5-land — ERA5-Land daily statistics, 0.1° SOLO TIERRA (Copernicus CDS + mirror EDH). Grilla distinta a era5 (0.25°), por eso es un dataset aparte y no variables nuevas de era5 — igual que cfs vs cfsr.
 
 - **Fuente:** `era5_cds` · **Resolución:** 0.1° · **Rango configurado:** 1950-01-01 -> hoy
-- **Variables:** `snowc_mean` (%)
+- **Variables:** `snowc_mean` (%), `swvl1` (m3 m-3)
 - **Ruta S3:** `s3://suyana-tiles/era5-land/daily-stats/<scene>.zarr`
 - **Escenas con datos (20):** mexico_norte, mexico_sur, centroamerica, antillas_mayores, antillas_menores, colombia, venezuela, guayanas, ecuador_galapagos, peru, bolivia, brasil_amazonia, brasil_nordeste, brasil_centro_sudeste, brasil_sur, paraguay, uruguay, chile_norte_centro, argentina_norte, patagonia
 
