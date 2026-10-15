@@ -9,6 +9,7 @@ allow extras.
 from __future__ import annotations
 
 import datetime as dt
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -109,7 +110,12 @@ class DatasetCfg(BaseModel):
 
 
 def load_global(config_dir: Path) -> GlobalCfg:
-    return GlobalCfg(**yaml.safe_load((config_dir / "config.yaml").read_text()))
+    cfg = GlobalCfg(**yaml.safe_load((config_dir / "config.yaml").read_text()))
+    # config.yaml apunta el workdir a un home; en el contenedor de Airflow eso
+    # no existe, así que la imagen lo redirige con esta variable.
+    if os.environ.get("TILEGEN_WORKDIR"):
+        cfg.runtime.workdir = Path(os.environ["TILEGEN_WORKDIR"])
+    return cfg
 
 
 def load_scenes(config_dir: Path) -> dict[str, SceneCfg]:

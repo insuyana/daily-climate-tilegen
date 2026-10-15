@@ -1,0 +1,177 @@
+# Actualización diaria de los cubos Zarr en s3://suyana-tiles.
+#
+# Es el crontab de ~/tilegen-prod traducido uno a uno: mismos horarios (UTC),
+# mismas escenas y mismas ventanas. Cada horario de `schedule` es un job; el
+# paso `plan` traduce el horario que disparó en los argumentos de tilegen.
+#
+# Encendido: los horarios NO hacen nada hasta que la variable del repo
+# TILEGEN_ACTIVO valga "true" (Settings > Secrets and variables > Actions >
+# Variables). Así el cron de la máquina y Actions nunca escriben los mismos
+# cubos a la vez: primero se apaga el crontab, después se prende esto.
+# El botón "Run workflow" (workflow_dispatch) anda siempre, para probar.
+#
+# Qué código corre: el tag de la variable TILEGEN_REF (p.ej. v0.5.0), igual que
+# prod-run.sh solo corría código tageado. Sin la variable, corre main.
+#
+# Secretos que necesita:
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY   usuario IAM github-tilegen (S3)
+#   CDSAPIRC   contenido entero de ~/.cdsapirc  (era5, era5-land)
+#   NETRC      contenido entero de ~/.netrc     (EDH, Earthdata)
+#   CLICKUP_TOKEN                               aviso de fallas (opcional)
+name: tilegen
+
+on:
+  schedule:
+    - cron: '0 5 * * *'    # cpc
+    - cron: '0 6 * * *'    # chirps
+    - cron: '30 6 * * *'   # era5-1
+    - cron: '15 7 * * *'   # era5-2
+    - cron: '0 8 * * *'    # era5-3
+    - cron: '0 9 * * 0'    # era5-swvl1
+    - cron: '30 9 * * *'   # chirps-v3
+    - cron: '30 10 * * *'  # era5-land
+    - cron: '0 12 * * *'   # cobertura
+    - cron: '0 14 * * 1'   # rechunk era5
+    - cron: '0 14 * * 2'   # rechunk chirps
+    - cron: '0 14 * * 4'   # rechunk chirts
+    - cron: '0 14 * * 5'   # rechunk chirps-v3
+    - cron: '0 14 * * 6'   # rechunk cfs
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Qué job correr
+        type: choice
+        options: [cpc, chirps, era5-1, era5-2, era5-3, era5-swvl1, chirps-v3,
+                  era5-land, cobertura, rechunk-era5, rechunk-chirps,
+                  rechunk-chirts, rechunk-chirps-v3, rechunk-cfs]
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      job: ${{ steps.p.outputs.job }}
+    steps:
+      - id: p
+        env:
+          CRON: ${{ github.event.schedule }}
+          ELEGIDO: ${{ inputs.job }}
+          ACTIVO: ${{ vars.TILEGEN_ACTIVO }}
+        run: |
+          if [ -n "$ELEGIDO" ]; then
+            echo "job=$ELEGIDO" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$ACTIVO" != "true" ]; then
+            echo "TILEGEN_ACTIVO no es 'true': los horarios están apagados."; exit 0
+          fi
+          case "$CRON" in
+            '0 5 * * *')   job=cpc ;;
+            '0 6 * * *')   job=chirps ;;
+            '30 6 * * *')  job=era5-1 ;;
+            '15 7 * * *')  job=era5-2 ;;
+            '0 8 * * *')   job=era5-3 ;;
+            '0 9 * * 0')   job=era5-swvl1 ;;
+            '30 9 * * *')  job=chirps-v3 ;;
+            '30 10 * * *') job=era5-land ;;
+            '0 12 * * *')  job=cobertura ;;
+            '0 14 * * 1')  job=rechunk-era5 ;;
+            '0 14 * * 2')  job=rechunk-chirps ;;
+            '0 14 * * 4')  job=rechunk-chirts ;;
+            '0 14 * * 5')  job=rechunk-chirps-v3 ;;
+            '0 14 * * 6')  job=rechunk-cfs ;;
+            *) echo "horario desconocido: $CRON"; exit 1 ;;
+          esac
+          echo "job=$job" >> "$GITHUB_OUTPUT"
+
+  run:
+    needs: plan
+    if: needs.plan.outputs.job != ''
+    name: ${{ needs.plan.outputs.job }}
+    runs-on: ubuntu-latest
+    # Tope de GitHub: 6 h. El rechunk se corta antes con `timeout` (abajo).
+    timeout-minutes: 350
+    # Dos corridas del mismo job no se pisan: la segunda espera (lo que hacía
+    # el flock de prod-run.sh). Jobs distintos corren en paralelo.
+    concurrency:
+      group: tilegen-${{ needs.plan.outputs.job }}
+      cancel-in-progress: false
+    env:
+      JOB: ${{ needs.plan.outputs.job }}
+      TILEGEN_WORKDIR: ${{ github.workspace }}/../work
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ vars.TILEGEN_REF || github.ref }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'   # zarr 3: los stores de EDH son Zarr v3
+          cache: pip
+          cache-dependency-path: deploy/requirements-lock.txt
+
+      - name: Instalar tilegen
+        run: |
+          pip install -r deploy/requirements-lock.txt
+          pip install --no-deps .
+
+      - name: Credenciales de las fuentes
+        env:
+          CDSAPIRC: ${{ secrets.CDSAPIRC }}
+          NETRC: ${{ secrets.NETRC }}
+        run: |
+          printf '%s\n' "$CDSAPIRC" > ~/.cdsapirc
+          printf '%s\n' "$NETRC" > ~/.netrc
+          chmod 600 ~/.cdsapirc ~/.netrc
+
+      - name: tilegen
+        run: |
+          TIERRA="mexico_norte mexico_sur centroamerica antillas_mayores
+            antillas_menores colombia venezuela guayanas ecuador_galapagos
+            peru bolivia brasil_amazonia brasil_nordeste brasil_centro_sudeste
+            brasil_sur paraguay uruguay chile_norte_centro argentina_norte patagonia"
+          TODAS="$TIERRA nino34"
+          x() { for e in "$@"; do printf -- '-x %s ' "$e"; done; }
+          desde() { echo "-s $(date -u -d "-$1 days" +%F)"; }
+          ERA5_VARS="-v t2m_mean -v t2m_max -v t2m_min -v precip_sum -v ssrd_sum -v sd_mean -v rsn_mean -v fg10_max"
+          set -- $TODAS
+          G1="${*:1:7}"; G2="${*:8:7}"; G3="${*:15:7}"
+
+          case "$JOB" in
+            cpc)        tilegen run -d cpc $(x $TIERRA) $(desde 45) ;;
+            chirps)     tilegen run -d chirps $(x $TIERRA) $(desde 70) ;;
+            era5-1)     tilegen run -d era5 $ERA5_VARS $(x $G1) $(desde 16) ;;
+            era5-2)     tilegen run -d era5 $ERA5_VARS $(x $G2) $(desde 16) ;;
+            era5-3)     tilegen run -d era5 $ERA5_VARS $(x $G3) $(desde 16) ;;
+            era5-swvl1) tilegen run -d era5 --source era5_edh -v swvl1 $(x $TODAS) $(desde 90) ;;
+            chirps-v3)  tilegen run -d chirps-v3 $(x $TIERRA) $(desde 70) ;;
+            era5-land)  tilegen run -d era5-land $(x $TIERRA) $(desde 120) ;;
+            cobertura)  python deploy/publicar_docs.py ;;
+            rechunk-*)
+              # Una tanda por corrida; cortar por tiempo es el diseño (sigue
+              # donde quedó la semana siguiente), así que 124 no es falla.
+              # Corre a las 14h, cuando ya no queda ningún job de datos vivo.
+              timeout --signal=INT 5h tilegen rechunk -d "${JOB#rechunk-}" --yes --keep-old \
+                || { rc=$?; [ $rc -eq 124 ] && echo "cortado por tiempo" || exit $rc; } ;;
+            *) echo "job desconocido: $JOB"; exit 1 ;;
+          esac
+
+      - name: Avisar a ClickUp
+        if: failure()
+        env:
+          TOKEN: ${{ secrets.CLICKUP_TOKEN }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$TOKEN" ] || { echo "sin token de ClickUp, no aviso"; exit 0; }
+          TEXTO="🔴 \`$JOB\` **falló** — $(date -u +'%d/%m %H:%M') UTC
+          Los cubos de ese dataset **no se actualizaron hoy**. Log: $URL"
+          BODY=$(TEXTO="$TEXTO" python -c 'import json,os;print(json.dumps({"type":"message","content_format":"text/md","content":os.environ["TEXTO"]}))')
+          curl -sS --max-time 20 -o /dev/null -w 'ClickUp http %{http_code}\n' -X POST \
+            -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
+            https://api.clickup.com/api/v3/workspaces/9011058683/chat/channels/6-901109639647-8/messages \
+            -d "$BODY" || true

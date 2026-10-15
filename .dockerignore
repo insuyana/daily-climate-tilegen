@@ -1,0 +1,7 @@
+.git
+.work
+logs
+*.egg-info
+__pycache__
+docs/*.docx
+deploy/airflow

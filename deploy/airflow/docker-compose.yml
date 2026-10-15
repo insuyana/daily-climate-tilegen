@@ -1,0 +1,98 @@
+# Airflow para tilegen: LocalExecutor + Postgres, en una sola máquina.
+#
+# Corre como el usuario de servicio `tilegen` (no como una persona). Las tareas
+# no corren dentro de Airflow: cada una lanza un contenedor de la imagen
+# tilegen:<tag> por el docker de la máquina (de ahí el docker.sock).
+#
+# Configuración en .env (copiar de .env.example; .env NO se commitea).
+# Pasos completos en deploy/README.md.
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:3.3.2-python3.12
+  restart: always
+  user: "${AIRFLOW_UID}:0"
+  # grupo docker del host -> puede usar docker.sock para lanzar las tareas
+  group_add:
+    - "${DOCKER_GID}"
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${POSTGRES_PASSWORD}@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${JWT_SECRET}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # DAG nuevo = pausado hasta que alguien lo prenda a mano: durante la
+    # convivencia con el cron se prenden de a uno.
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: utc
+    # ruta de los secretos EN EL HOST: los contenedores de las tareas los
+    # monta el docker de la máquina, que no ve el filesystem de Airflow.
+    TILEGEN_HOST_SECRETS_DIR: ${TILEGEN_SECRETS_DIR}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ${TILEGEN_SECRETS_DIR}:/opt/tilegen/secrets:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+  depends_on: &airflow-depends
+    postgres:
+      condition: service_healthy
+    airflow-init:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+
+  # Una vez por `docker compose up`: migra la base, crea el admin, el pool y la
+  # variable de la imagen. Todo idempotente; no pisa lo que ya existe.
+  airflow-init:
+    <<: *airflow-common
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        airflow users list | grep -qw "${ADMIN_USER}" || \
+          airflow users create --role Admin --username "${ADMIN_USER}" \
+            --password "${ADMIN_PASSWORD}" --email "${ADMIN_EMAIL}" \
+            --firstname admin --lastname tilegen
+        # 16 = POOL_SLOTS en dags/tilegen.py: el rechunk ocupa el pool entero
+        airflow pools set tilegen_s3 16 "tilegen: escritura de cubos (rechunk lo toma entero)"
+        airflow variables get tilegen_image >/dev/null 2>&1 || \
+          airflow variables set tilegen_image "${TILEGEN_IMAGE}"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    # Solo localhost: el equipo entra por túnel SSH hasta que se decida otra
+    # cosa (ver README, "Acceso a la interfaz").
+    ports:
+      - "127.0.0.1:${AIRFLOW_PORT:-8080}:8080"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+
+volumes:
+  postgres-db:
