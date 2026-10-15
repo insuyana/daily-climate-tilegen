@@ -5,3 +5,13 @@ build/
 dist/
 .ipynb_checkpoints/
 *.pyc
+node_modules/
+package-lock.json
+package.json
+
+# Airflow: secretos y logs locales (el repo es público)
+deploy/airflow/.env
+deploy/airflow/logs/
+
+# Logs sueltos de corridas a mano
+logs/
