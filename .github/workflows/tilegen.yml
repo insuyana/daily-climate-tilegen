@@ -118,6 +118,17 @@ jobs:
         with:
           ref: ${{ vars.TILEGEN_REF || github.ref }}
 
+      # Con qué identidad se presenta el repo ante AWS. Si el rol rechaza
+      # la corrida, comparar `sub` con lo que acepta el rol.
+      - name: Identidad OIDC
+        run: |
+          curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
+          | python3 -c "import sys,json,base64; t=json.load(sys.stdin)['value'].split('.')[1]; t+='='*(-len(t)%4); c=json.loads(base64.urlsafe_b64decode(t)); print(json.dumps({k:c.get(k) for k in ('sub','aud','iss','repository','ref','environment')}, indent=2))"
+
+      - name: Chequear AWS_ROLE_ARN
+        run: test -n "${{ vars.AWS_ROLE_ARN }}" || { echo "falta la variable AWS_ROLE_ARN"; exit 1; }
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
