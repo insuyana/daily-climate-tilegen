@@ -6,9 +6,10 @@ temporal: daily
 start: 1979-01-01
 lag_days: 3           # el archivo del año en curso se actualiza con ~2 días de atraso
 
-# OPeNDAP, no el directorio de descarga: el servidor aplica el bbox antes de
-# mandar nada (~1.7 MB por año/escena en vez de los ~380 MB del archivo global).
-base_url: https://psl.noaa.gov/thredds/dodsC/Datasets/cpc_global_temp
+# El archivo anual entero (~63 MB comprimido), no OPeNDAP: desde el 12-oct-2026
+# el THREDDS de PSL le contesta 429 a este server aunque sea un solo pedido.
+# Se baja una vez por corrida y cada escena recorta en local.
+base_url: https://downloads.psl.noaa.gov/Datasets/cpc_global_temp
 
 variables:
   tmax:

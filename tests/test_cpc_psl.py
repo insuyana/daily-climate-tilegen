@@ -11,6 +11,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 import pytest
+import requests
 import xarray as xr
 
 from tilegen.sources.base import Granule
@@ -108,15 +109,101 @@ def test_dates_not_yet_published_raise_filenotfound(tmp_path):
         src._read_year(_granule(dias=2, desde="2024-06-01"))
 
 
-def test_a_missing_year_file_raises_filenotfound(tmp_path):
-    src = _source(tmp_path, _cpc())
+class _Resp:
+    """Respuesta de requests mínima, para no salir a la red."""
 
-    def _boom(url):
-        raise OSError("404 NetCDF: file not found")
+    def __init__(self, status, body=b"", headers=None):
+        self.status_code, self._body, self.headers = status, body, headers or {}
 
-    src._open = _boom
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Error", response=self)
+
+    def iter_content(self, n):
+        yield self._body
+
+
+@pytest.fixture
+def red(monkeypatch):
+    """Cola de respuestas para requests.get; anota los headers de cada pedido."""
+    import tilegen.utils
+    import tilegen.sources.cpc_psl as mod
+
+    monkeypatch.setattr(tilegen.utils.time, "sleep", lambda s: None)
+    estado = {"cola": [], "pedidos": []}
+
+    def _get(url, headers=None, **kw):
+        estado["pedidos"].append(dict(headers or {}))
+        return estado["cola"].pop(0)
+
+    monkeypatch.setattr(mod.requests, "get", _get)
+    return estado
+
+
+def test_a_missing_year_file_raises_filenotfound(tmp_path, red):
+    """404: NOAA todavía no empezó ese año -> 'missing', no error."""
+    src = CpcPslSource(_Cfg({"tmax": _Var(source_file="tmax")}), tmp_path)
+    red["cola"] = [_Resp(404)]
     with pytest.raises(FileNotFoundError, match="not available"):
         src._read_year(_granule())
+    assert len(red["pedidos"]) == 1, "un 404 no se reintenta"
+
+
+def test_429_is_an_error_not_a_missing_day(tmp_path, red):
+    """El bug del 12-oct-2026: el 429 pasaba por 'no publicado' y la corrida
+    terminaba ok sin escribir nada. Tiene que reintentarse y después fallar."""
+    src = CpcPslSource(_Cfg({"tmax": _Var(source_file="tmax")}), tmp_path)
+    red["cola"] = [_Resp(429) for _ in range(5)]
+    with pytest.raises(requests.HTTPError) as exc:
+        src._read_year(_granule())
+    assert not isinstance(exc.value, FileNotFoundError)
+    assert len(red["pedidos"]) == 5
+
+
+def test_429_then_ok_recovers(tmp_path, red):
+    src = CpcPslSource(_Cfg({"tmax": _Var(source_file="tmax")}), tmp_path)
+    red["cola"] = [_Resp(429), _Resp(200, b"datos")]
+    dst = src._download("https://x/tmax.2024.nc", tmp_path / "tmax.2024.nc")
+    assert dst.read_bytes() == b"datos"
+    assert not list(tmp_path.glob("*.part")), "quedó un archivo a medias"
+
+
+def test_a_current_copy_is_not_downloaded_again(tmp_path, red):
+    """Primera vez baja y fija la fecha del server; la segunda manda
+    If-Modified-Since con esa fecha y un 304 deja el archivo como estaba."""
+    src = CpcPslSource(_Cfg({"tmax": _Var(source_file="tmax")}), tmp_path)
+    dst = tmp_path / "tmax.2024.nc"
+    red["cola"] = [_Resp(200, b"v1", {"Last-Modified": "Wed, 14 Oct 2026 15:41:48 GMT"}),
+                   _Resp(304)]
+    src._download("https://x/tmax.2024.nc", dst)
+    src._download("https://x/tmax.2024.nc", dst)
+    assert "If-Modified-Since" not in red["pedidos"][0]
+    assert red["pedidos"][1]["If-Modified-Since"] == "Wed, 14 Oct 2026 15:41:48 GMT"
+    assert dst.read_bytes() == b"v1"
+
+
+def test_a_newer_file_replaces_the_copy(tmp_path, red):
+    src = CpcPslSource(_Cfg({"tmax": _Var(source_file="tmax")}), tmp_path)
+    dst = tmp_path / "tmax.2026.nc"
+    red["cola"] = [_Resp(200, b"v1", {"Last-Modified": "Wed, 14 Oct 2026 15:41:48 GMT"}),
+                   _Resp(200, b"v2", {"Last-Modified": "Thu, 15 Oct 2026 15:41:48 GMT"})]
+    src._download("https://x/tmax.2026.nc", dst)
+    src._download("https://x/tmax.2026.nc", dst)
+    assert dst.read_bytes() == b"v2"
+
+
+def test_a_stale_crop_is_cropped_again(tmp_path):
+    """Un recorte que quedó de otra corrida con menos días no se reusa."""
+    src = _source(tmp_path, _cpc(dias=3), area=(-80.0, -6.0, -70.0, 6.0))
+    assert len(src.fetch(_granule(dias=3))) == 3
+    src._open = lambda url: _cpc(dias=5)          # NOAA agregó dos días
+    assert len(src.fetch(_granule(dias=5))) == 5
 
 
 def test_fetch_caches_the_year_and_indexes_the_days(tmp_path):
