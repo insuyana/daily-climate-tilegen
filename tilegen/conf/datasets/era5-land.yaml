@@ -61,3 +61,18 @@ variables:
     # que EDH todavía no subió y lo congelaría — el mismo pozo en el que cayó
     # swvl1. Ver docs y config.py.
     missing_after_days: 150
+  swvl1:
+    # HUMEDAD DE SUELO, capa 1 (0-7 cm), m3/m3. La misma variable que swvl1 de
+    # `era5` pero en la grilla de 0.1° de ERA5-Land: tres veces más fina, que en
+    # Centroamérica separa valles de laderas que a 0.25° caen en la misma celda.
+    #
+    # Es de ESTADO, así que el diario es el promedio de las 24 horas, igual que
+    # snowc_mean. El backfill va por el mirror horario de EDH (verificado el
+    # 2026-10-01: `swvl1` está en era5-land-v0.zarr desde 1950).
+    cds_variable: volumetric_soil_water_layer_1
+    daily_statistic: daily_mean
+    edh_hourly_variable: swvl1
+    edh_hourly_statistic: mean
+    units: m3 m-3
+    # Mismo motivo que snowc_mean: el mirror va ~2 meses atrás.
+    missing_after_days: 150
