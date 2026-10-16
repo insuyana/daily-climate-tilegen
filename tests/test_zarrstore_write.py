@@ -37,8 +37,9 @@ def _day(idx: int) -> xr.DataArray:
     )
 
 
-def _make_store(tmp_path) -> ZarrStore:
-    gcfg = GlobalCfg(s3=S3Cfg(bucket="unused"), zarr=ZarrCfg(time_chunk=3, spatial_chunk=2))
+def _make_store(tmp_path, time_chunk=3) -> ZarrStore:
+    gcfg = GlobalCfg(s3=S3Cfg(bucket="unused"),
+                     zarr=ZarrCfg(time_chunk=time_chunk, spatial_chunk=2))
     dcfg = DatasetCfg(
         name="testds", version="v1", source="http_geotiff",
         start=START, end=END, variables={VARIABLE: VariableCfg(units="K")},
@@ -148,3 +149,49 @@ def test_ensure_variables_adds_without_touching_existing_data(tmp_path):
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_an_all_nan_write_never_deletes(tmp_path, monkeypatch):
+    """La cuenta nueva de AWS (suyana-dev) no permite borrar, ni siquiera una
+    clave que no existe. zarr 3, por defecto, BORRA el chunk cuando lo que le
+    toca escribir es todo NaN (un pedazo de océano en cpc o era5-land), así que
+    toda escritura así fallaba con AccessDenied. Tiene que escribirlo, no borrarlo."""
+    import fsspec.implementations.local as local
+
+    store = _make_store(tmp_path)
+
+    def _sin_borrar(*a, **k):
+        raise PermissionError("s3:DeleteObject denied")
+
+    monkeypatch.setattr(local.LocalFileSystem, "rm", _sin_borrar)
+    monkeypatch.setattr(local.LocalFileSystem, "rm_file", _sin_borrar)
+    monkeypatch.setattr(local.LocalFileSystem, "_rm", _sin_borrar, raising=False)
+
+    vacio = _day(0).copy(data=np.full((1, LAT.size, LON.size), np.nan, "float32"))
+    store.write_batch(vacio, VARIABLE)
+    store.write_batch(_day(1), VARIABLE)
+    got = _reopen(store)[VARIABLE]
+    assert np.isnan(got.isel(time=0).values).all()
+    np.testing.assert_array_equal(got.isel(time=1).values, _value(1))
+
+
+def test_extending_the_time_axis_never_deletes(tmp_path, monkeypatch):
+    """Lo mismo al estirar el eje de tiempo: lo que se agrega es todo NaN.
+    (time_chunk=5 para que los 10 días del cubo de prueba cierren en chunks.)"""
+    import fsspec.implementations.local as local
+
+    store = _make_store(tmp_path, time_chunk=5)
+    store.write_batch(_day(1), VARIABLE)
+
+    def _sin_borrar(*a, **k):
+        raise PermissionError("s3:DeleteObject denied")
+
+    monkeypatch.setattr(local.LocalFileSystem, "rm", _sin_borrar)
+    monkeypatch.setattr(local.LocalFileSystem, "rm_file", _sin_borrar)
+    monkeypatch.setattr(local.LocalFileSystem, "_rm", _sin_borrar, raising=False)
+
+    store.ensure_covers(END + dt.timedelta(days=20))
+    got = _reopen(store)[VARIABLE]
+    assert got.sizes["time"] > (END - START).days + 1
+    np.testing.assert_array_equal(got.isel(time=1).values, _value(1))
+    assert np.isnan(got.isel(time=-1).values).all()

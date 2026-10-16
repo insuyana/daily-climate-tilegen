@@ -118,7 +118,11 @@ class ZarrStore:
                 coords={"time": times, "latitude": ds["latitude"].values,
                         "longitude": ds["longitude"].values},
             )
-        ext.to_zarr(self.mapper(), append_dim="time", consolidated=True, **_v2_kwargs())
+        # compute=False: grow the axis, leave the new days unwritten (they read
+        # as the NaN fill value). Writing them would make zarr 3 delete every
+        # all-NaN chunk, and the suyana-dev account denies deletes.
+        ext.to_zarr(self.mapper(), append_dim="time", consolidated=True,
+                    compute=False, **_v2_kwargs())
         log.info("extended %s through %s", self.uri, times[-1].date())
 
     def ensure_variables(self, variables) -> None:
@@ -173,9 +177,13 @@ class ZarrStore:
         times = pd.DatetimeIndex(da["time"].values)
         gaps = np.diff(times.values).astype("timedelta64[D]") > np.timedelta64(1, "D")
         breaks = np.flatnonzero(gaps) + 1
+        # write_empty_chunks: zarr 3 otherwise DELETES a chunk that comes out
+        # all-NaN (ocean in cpc, era5-land), and the suyana-dev account denies
+        # every delete, even of a key that does not exist.
         for run in np.split(np.arange(times.size), breaks):
             (da.isel(time=run).to_dataset(name=variable)
-               .to_zarr(self.mapper(), region="auto", consolidated=False))
+               .to_zarr(self.mapper(), region="auto", consolidated=False,
+                        write_empty_chunks=True))
 
     # --- chunking ---------------------------------------------------------
     def chunk_info(self) -> dict:
