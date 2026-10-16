@@ -11,10 +11,14 @@ Sale con 1 si algo falló, para que Airflow lo marque y avise.
 """
 import subprocess
 import sys
+from pathlib import Path
 
 import boto3
 
-BUCKET = "suyana-tiles"
+from tilegen.config import load_global
+
+# El mismo bucket del que leen los generadores (TILEGEN_BUCKET si está puesta).
+BUCKET = load_global(Path("config")).s3.bucket
 
 # generador -> archivos que produce, con su content-type. Sin content-type S3
 # los sirve como binario y el navegador los baja en vez de mostrarlos.

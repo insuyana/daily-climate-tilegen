@@ -1,4 +1,4 @@
-# Actualización diaria de los cubos Zarr en s3://suyana-tiles.
+# Actualización diaria de los cubos Zarr en s3://suyana-dev-tiles.
 #
 # Es el crontab de ~/tilegen-prod traducido uno a uno: mismos horarios (UTC),
 # mismas escenas y mismas ventanas. Cada horario de `schedule` es un job; el
@@ -9,6 +9,9 @@
 # Variables). Así el cron de la máquina y Actions nunca escriben los mismos
 # cubos a la vez: primero se apaga el crontab, después se prende esto.
 # El botón "Run workflow" (workflow_dispatch) anda siempre, para probar.
+#
+# Sin rechunk: los cubos ya quedaron en chunks de 32 px, y en la cuenta nueva
+# no se puede borrar, que es lo que hace el rechunk al promover el cubo nuevo.
 #
 # Qué código corre: el tag de la variable TILEGEN_REF (p.ej. v0.5.0), igual que
 # prod-run.sh solo corría código tageado. Sin la variable, corre main.
@@ -35,19 +38,13 @@ on:
     - cron: '30 9 * * *'   # chirps-v3
     - cron: '30 10 * * *'  # era5-land
     - cron: '0 12 * * *'   # cobertura
-    - cron: '0 14 * * 1'   # rechunk era5
-    - cron: '0 14 * * 2'   # rechunk chirps
-    - cron: '0 14 * * 4'   # rechunk chirts
-    - cron: '0 14 * * 5'   # rechunk chirps-v3
-    - cron: '0 14 * * 6'   # rechunk cfs
   workflow_dispatch:
     inputs:
       job:
         description: Qué job correr
         type: choice
         options: [cpc, chirps, era5-1, era5-2, era5-3, era5-swvl1, chirps-v3,
-                  era5-land, cobertura, rechunk-era5, rechunk-chirps,
-                  rechunk-chirts, rechunk-chirps-v3, rechunk-cfs]
+                  era5-land, cobertura]
       escenas:
         description: Solo estas escenas, separadas por espacio (vacío = las de siempre)
         type: string
@@ -85,11 +82,6 @@ jobs:
             '30 9 * * *')  job=chirps-v3 ;;
             '30 10 * * *') job=era5-land ;;
             '0 12 * * *')  job=cobertura ;;
-            '0 14 * * 1')  job=rechunk-era5 ;;
-            '0 14 * * 2')  job=rechunk-chirps ;;
-            '0 14 * * 4')  job=rechunk-chirts ;;
-            '0 14 * * 5')  job=rechunk-chirps-v3 ;;
-            '0 14 * * 6')  job=rechunk-cfs ;;
             *) echo "horario desconocido: $CRON"; exit 1 ;;
           esac
           echo "job=$job" >> "$GITHUB_OUTPUT"
@@ -99,7 +91,7 @@ jobs:
     if: needs.plan.outputs.job != ''
     name: ${{ needs.plan.outputs.job }}
     runs-on: ubuntu-latest
-    # Tope de GitHub: 6 h. El rechunk se corta antes con `timeout` (abajo).
+    # Tope de GitHub: 6 h.
     timeout-minutes: 350
     # Dos corridas del mismo job no se pisan: la segunda espera (lo que hacía
     # el flock de prod-run.sh). Jobs distintos corren en paralelo.
@@ -179,12 +171,6 @@ jobs:
             chirps-v3)  tilegen run -d chirps-v3 $(x $TIERRA) $(desde 70) ;;
             era5-land)  tilegen run -d era5-land $(x $TIERRA) $(desde 120) ;;
             cobertura)  python deploy/publicar_docs.py ;;
-            rechunk-*)
-              # Una tanda por corrida; cortar por tiempo es el diseño (sigue
-              # donde quedó la semana siguiente), así que 124 no es falla.
-              # Corre a las 14h, cuando ya no queda ningún job de datos vivo.
-              timeout --signal=INT 5h tilegen rechunk -d "${JOB#rechunk-}" --yes --keep-old \
-                || { rc=$?; [ $rc -eq 124 ] && echo "cortado por tiempo" || exit $rc; } ;;
             *) echo "job desconocido: $JOB"; exit 1 ;;
           esac
 
