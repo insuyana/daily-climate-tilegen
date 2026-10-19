@@ -158,3 +158,31 @@ def test_csv_con_point_id_repetido(tmp_path):
     _puntos(("a", "x", 1, 2), ("a", "x", 3, 4)).to_csv(f, index=False)
     with pytest.raises(ValueError, match="repeated"):
         pts.read_points(f)
+
+
+# --- red ------------------------------------------------------------------
+
+def test_un_502_de_edh_se_reintenta(monkeypatch):
+    """aiohttp.ClientResponseError no es OSError: antes cortaba la corrida."""
+    import aiohttp
+    from multidict import CIMultiDict, CIMultiDictProxy
+    from yarl import URL
+
+    monkeypatch.setattr(pts.time, "sleep", lambda s: None)
+    intentos = []
+
+    def lee():
+        intentos.append(1)
+        if len(intentos) < 3:
+            info = aiohttp.RequestInfo(url=URL("https://edh/x"), method="GET",
+                                       headers=CIMultiDictProxy(CIMultiDict()))
+            raise aiohttp.ClientResponseError(info, (), status=502, message="Bad Gateway")
+        return "ok"
+
+    assert pts._with_retry(lee) == "ok" and len(intentos) == 3
+
+
+def test_un_error_de_programacion_no_se_reintenta(monkeypatch):
+    monkeypatch.setattr(pts.time, "sleep", lambda s: None)
+    with pytest.raises(KeyError):
+        pts._with_retry(lambda: {}["x"])

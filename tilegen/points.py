@@ -168,11 +168,15 @@ def _groups(i, j, ci, cj):
     return {k: np.array(v) for k, v in g.items()}
 
 
-def _with_retry(fn, tries=4, wait=5.0):
+def _with_retry(fn, tries=5, wait=10.0):
+    # aiohttp.ClientError no es OSError: un 502 de EDH (ClientResponseError) se
+    # escapaba sin reintento y cortaba la corrida entera (pasó el 2026-10-19).
+    import aiohttp
+
     for n in range(tries):
         try:
             return fn()
-        except (OSError, RuntimeError, TimeoutError) as e:   # red / HTTP de EDH
+        except (OSError, RuntimeError, TimeoutError, aiohttp.ClientError) as e:
             if n == tries - 1:
                 raise
             log.warning("EDH read failed (%s), retrying in %.0f s", e, wait * (n + 1))
