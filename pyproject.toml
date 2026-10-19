@@ -32,6 +32,11 @@ dependencies = [
     "pandas",
 ]
 
+[project.optional-dependencies]
+# Sólo para `tilegen extract-points` (series horarias en puntos, a parquet).
+# Aparte para no cambiar lo que instala el flujo diario.
+points = ["pyarrow>=14"]
+
 [project.scripts]
 tilegen = "tilegen.cli:cli"
 

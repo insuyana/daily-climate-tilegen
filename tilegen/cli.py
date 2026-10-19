@@ -5,6 +5,7 @@
     tilegen run  -d chirps ...            # same options as plan
     tilegen verify -d chirps
     tilegen init-bucket
+    tilegen extract-points --points pts.csv -s 2016-01-01 --out s3://...
 """
 from __future__ import annotations
 
@@ -515,6 +516,60 @@ def rechunk(config_dir, dataset, scene_names, dry_run, keep_old, no_verify, resu
             fallidos.append(f"{stem}/{scene}")
     click.echo(f"\n{hechos} rechunkeados, {len(fallidos)} fallidos"
                + (": " + ", ".join(fallidos) if fallidos else ""))
+
+
+@cli.command("extract-points")
+@click.option("--points", "points_path", required=True,
+              help="CSV con point_id, lat, lon (local o s3://).")
+@click.option("-s", "--start", type=click.DateTime(["%Y-%m-%d"]), required=True)
+@click.option("-e", "--end", type=click.DateTime(["%Y-%m-%d"]), default=None,
+              help="Último día, inclusive (default: lo último que hay en EDH).")
+@click.option("--out", required=True,
+              help="Carpeta de salida (local o s3://); escribe <dataset>/<año>.parquet.")
+@click.option("-d", "--dataset", "datasets_", multiple=True,
+              type=click.Choice(["era5", "era5-land"]), default=("era5", "era5-land"),
+              show_default=True)
+@click.option("-v", "--variable", "variables", multiple=True,
+              help="Sólo estas variables (default: todas las del dataset, ver tilegen/points.py).")
+@click.option("--aws-profile", default=None, envvar="AWS_PROFILE",
+              help="Perfil de AWS para leer/escribir en S3 (p.ej. suyana-dev).")
+@click.option("--workers", type=int, default=8, show_default=True,
+              help="Chunks de EDH leídos en paralelo.")
+@click.option("--overwrite", is_flag=True, help="Rehacer también los años ya escritos.")
+@click.pass_obj
+def extract_points(config_dir, points_path, start, end, out, datasets_, variables,
+                   aws_profile, workers, overwrite):
+    """Series HORARIAS de ERA5 / ERA5-Land en puntos, a parquet (pedido extra).
+
+    No toca los cubos: lee el store horario de EDH (misma clave en ~/.netrc) y
+    escribe un parquet largo por dataset y año. Re-correr saltea lo ya escrito.
+    """
+    import fsspec
+
+    from . import points as pts
+    from .sources.edh import Era5EdhSource
+
+    so = {"profile": aws_profile} if aws_profile else {}
+    p = pts.read_points(points_path,
+                        storage_options=so if points_path.startswith("s3://") else None)
+    if out.startswith("s3://"):
+        fs, root = fsspec.filesystem("s3", **so), out[len("s3://"):]
+    else:
+        fs, root = fsspec.core.url_to_fs(out)
+    click.echo(f"{len(p)} points from {points_path}")
+    workdir = load_global(config_dir).runtime.workdir / "points"
+    summary = {}
+    for name in datasets_:
+        cfg = load_dataset(config_dir, name)
+        ds = Era5EdhSource(cfg, workdir)._open(cfg.edh_hourly_store)
+        wanted = [v for v in variables
+                  if v in pts.default_variables(name) or v in pts.NOT_IN_EDH] or None
+        if variables and not wanted:
+            click.echo(f"{name}: none of {list(variables)} applies, skipping")
+            continue
+        summary[name] = pts.extract(ds, name, p, start, end, root, variables=wanted,
+                                    fs=fs, workers=workers, overwrite=overwrite)
+    click.echo(json.dumps(summary, indent=2))
 
 
 @cli.command("init-bucket")
