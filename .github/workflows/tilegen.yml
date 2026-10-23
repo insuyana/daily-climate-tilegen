@@ -31,9 +31,7 @@ on:
   schedule:
     - cron: '0 5 * * *'    # cpc
     - cron: '0 6 * * *'    # chirps
-    - cron: '30 6 * * *'   # era5-1
-    - cron: '15 7 * * *'   # era5-2
-    - cron: '0 8 * * *'    # era5-3
+    - cron: '30 6 * * *'   # era5
     - cron: '0 9 * * 0'    # era5-swvl1
     - cron: '30 9 * * *'   # chirps-v3
     - cron: '30 10 * * *'  # era5-land
@@ -43,8 +41,7 @@ on:
       job:
         description: Qué job correr
         type: choice
-        options: [cpc, chirps, era5-1, era5-2, era5-3, era5-swvl1, chirps-v3,
-                  era5-land, cobertura]
+        options: [cpc, chirps, era5, era5-swvl1, chirps-v3, era5-land, cobertura]
       escenas:
         description: Solo estas escenas, separadas por espacio (vacío = las de siempre)
         type: string
@@ -75,9 +72,7 @@ jobs:
           case "$CRON" in
             '0 5 * * *')   job=cpc ;;
             '0 6 * * *')   job=chirps ;;
-            '30 6 * * *')  job=era5-1 ;;
-            '15 7 * * *')  job=era5-2 ;;
-            '0 8 * * *')   job=era5-3 ;;
+            '30 6 * * *')  job=era5 ;;
             '0 9 * * 0')   job=era5-swvl1 ;;
             '30 9 * * *')  job=chirps-v3 ;;
             '30 10 * * *') job=era5-land ;;
@@ -158,15 +153,15 @@ jobs:
           x() { for e in "$@"; do printf -- '-x %s ' "$e"; done; }
           desde() { echo "-s $(date -u -d "-$1 days" +%F)"; }
           ERA5_VARS="-v t2m_mean -v t2m_max -v t2m_min -v precip_sum -v ssrd_sum -v sd_mean -v rsn_mean -v fg10_max"
-          set -- $TODAS
-          G1="${*:1:7}"; G2="${*:8:7}"; G3="${*:15:7}"
+          # era5 va en un solo job: con cds_fetch_area todas las escenas usan
+          # la misma descarga, y en 3 grupos le pedíamos lo mismo 3 veces al
+          # CDS (24 pedidos por día en vez de 8), que nos rechaza cuando
+          # tenemos muchos en la fila.
 
           case "$JOB" in
             cpc)        tilegen run -d cpc $(x $TIERRA) $(desde 45) ;;
             chirps)     tilegen run -d chirps $(x $TIERRA) $(desde 70) ;;
-            era5-1)     tilegen run -d era5 $ERA5_VARS $(x $G1) $(desde 16) ;;
-            era5-2)     tilegen run -d era5 $ERA5_VARS $(x $G2) $(desde 16) ;;
-            era5-3)     tilegen run -d era5 $ERA5_VARS $(x $G3) $(desde 16) ;;
+            era5)       tilegen run -d era5 $ERA5_VARS $(x $TODAS) $(desde 16) ;;
             era5-swvl1) tilegen run -d era5 --source era5_edh -v swvl1 $(x $TODAS) $(desde 90) ;;
             chirps-v3)  tilegen run -d chirps-v3 $(x $TIERRA) $(desde 70) ;;
             era5-land)  tilegen run -d era5-land $(x $TIERRA) $(desde 120) ;;
@@ -174,14 +169,18 @@ jobs:
             *) echo "job desconocido: $JOB"; exit 1 ;;
           esac
 
+      # También cuando el job se corta: al llegar a timeout-minutes GitHub lo
+      # cancela y eso no cuenta como failure(), así que antes no avisaba.
       - name: Avisar a ClickUp
-        if: failure()
+        if: failure() || cancelled()
         env:
           TOKEN: ${{ secrets.CLICKUP_TOKEN }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ESTADO: ${{ job.status }}
         run: |
           [ -n "$TOKEN" ] || { echo "sin token de ClickUp, no aviso"; exit 0; }
-          TEXTO="🔴 \`$JOB\` **falló** — $(date -u +'%d/%m %H:%M') UTC
+          if [ "$ESTADO" = cancelled ]; then QUE="se cortó (tiempo máximo o cancelado a mano)"; else QUE="falló"; fi
+          TEXTO="🔴 \`$JOB\` **$QUE**, $(date -u +'%d/%m %H:%M') UTC
           Los cubos de ese dataset **no se actualizaron hoy**. Log: $URL"
           BODY=$(TEXTO="$TEXTO" python -c 'import json,os;print(json.dumps({"type":"message","content_format":"text/md","content":os.environ["TEXTO"]}))')
           curl -sS --max-time 20 -o /dev/null -w 'ClickUp http %{http_code}\n' -X POST \
