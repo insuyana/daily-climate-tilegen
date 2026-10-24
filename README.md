@@ -192,6 +192,57 @@ LOG=~/tile_generation_module/.work/cron.log
    `granules()` and `fetch()`, ~40 lines — see `era5.py`) and register it in
    `tilegen/sources/__init__.py`.
 
+## Hourly series at points (`extract-points`)
+
+A side job, separate from the daily cubes (it never reads or writes them):
+hourly ERA5 / ERA5-Land values at a list of points, for validating against
+weather stations. It reads the same Earth Data Hub hourly stores as the
+`era5_edh` source (`edh_hourly_store` in each dataset YAML, same key in
+`~/.netrc`).
+
+```bash
+pip install '.[points]'      # adds pyarrow
+tilegen extract-points \
+  --points s3://suyana-dev-validation/argentina/data/puntos_era5_hourly.csv \
+  -s 2016-01-01 -e 2026-09-30 \
+  --out s3://suyana-dev-validation/argentina/data/era5_hourly \
+  --aws-profile suyana-dev
+```
+
+- **Input:** a CSV with `point_id`, `lat`, `lon` (other columns are ignored).
+  `-e` defaults to the last hour in the store; `-d` and `-v` restrict datasets
+  and variables.
+- **Output:** one parquet per dataset and year, `<out>/<dataset>/<year>.parquet`,
+  in long format: `point_id, dataset, time_utc, variable, value, px_lat, px_lon`.
+- **Variables:** `era5` has `t2m, tp, u10, v10, wind_speed, swvl1..4`;
+  `era5-land` has `swvl1..4`. Soil layers: 1 = 0-7 cm, 2 = 7-28 cm,
+  3 = 28-100 cm, 4 = 100-289 cm. The gust (`fg10`) is not in EDH, so it is
+  skipped with a warning.
+- **Pixel:** the nearest one to each point, picked separately on each grid.
+  If that pixel has no data (ERA5-Land is land only, so a coastal point can fall
+  in the sea), the nearest pixel *with* data is used instead, within 5 pixels,
+  and the log says so. `px_lat` / `px_lon` always give the pixel actually used
+  (lon in -180..180).
+- **Re-running:** a year is skipped when its file already covers the same
+  period, variables and points (recorded in the parquet metadata). The current,
+  incomplete year is redone once the store has more hours. `--overwrite` redoes
+  everything.
+
+Units are the store's, unchanged:
+
+| variable | unit | meaning / conversion |
+|---|---|---|
+| `t2m` | K | 2 m temperature. °C = K − 273.15 |
+| `tp` | m | precipitation **accumulated over the hour that ends at `time_utc`** (the 00:00 row is rain from 23:00 to 00:00). mm = m × 1000; the daily total of day D is 01:00 D .. 00:00 D+1 |
+| `u10`, `v10` | m/s | 10 m wind components (east, north) |
+| `wind_speed` | m/s | computed here: √(u10² + v10²). km/h = m/s × 3.6 |
+| `swvl1..4` | m³/m³ | volumetric soil water of each layer. % = × 100 |
+
+`time_utc` is UTC, as stored (Argentina is UTC−3: local = UTC − 3 h). Reads go
+by store chunk, with points grouped by the chunk their pixel falls in: for the
+349 Argentine points that is ~14.5 GB from EDH for 2016-2026, about 90 s per
+year for both datasets.
+
 ## Code layout
 
 ```
@@ -209,7 +260,8 @@ tilegen/grid.py                fixed MERIT-style tile grid (cog format)
 tilegen/tiler.py               COG cutting (cog format)
 tilegen/pipeline.py            plan -> fetch -> tile -> upload (cog format)
 tilegen/s3io.py                S3: bucket, listings, uploads with retry
+tilegen/points.py              hourly series at points (extract-points), to parquet
 tilegen/cli.py                 tilegen commands
 tests/                         grid, zarr writes, rechunk, EDH hourly aggregation,
-                               CPC, ERA5 fetch window
+                               CPC, ERA5 fetch window, points extraction
 ```
