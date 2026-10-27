@@ -56,7 +56,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       job: ${{ steps.p.outputs.job }}
-      matrix: ${{ steps.m.outputs.matrix }}
     steps:
       - id: p
         env:
@@ -81,38 +80,24 @@ jobs:
             *) echo "horario desconocido: $CRON"; exit 1 ;;
           esac
           echo "job=$job" >> "$GITHUB_OUTPUT"
-      - id: m
-        env:
-          JOB: ${{ steps.p.outputs.job }}
-          ESCENAS: ${{ inputs.escenas }}
-        run: |
-          if [ "$JOB" = era5-land ] && [ -z "$ESCENAS" ]; then
-            echo 'matrix={"escena":["mexico_norte","mexico_sur","centroamerica","antillas_mayores","antillas_menores","colombia","venezuela","guayanas","ecuador_galapagos","peru","bolivia","brasil_amazonia","brasil_nordeste","brasil_centro_sudeste","brasil_sur","paraguay","uruguay","chile_norte_centro","argentina_norte","patagonia"]}' >> "$GITHUB_OUTPUT"
-          else
-            echo 'matrix={"escena":[""]}' >> "$GITHUB_OUTPUT"
-          fi
 
   run:
     needs: plan
     if: needs.plan.outputs.job != ''
-    name: ${{ needs.plan.outputs.job }} ${{ matrix.escena }}
+    name: ${{ needs.plan.outputs.job }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     # Tope de GitHub: 6 h.
     timeout-minutes: 350
     # Dos corridas del mismo job no se pisan: la segunda espera (lo que hacía
     # el flock de prod-run.sh). Jobs distintos corren en paralelo.
     concurrency:
-      group: tilegen-${{ needs.plan.outputs.job }}-${{ matrix.escena }}
+      group: tilegen-${{ needs.plan.outputs.job }}
       cancel-in-progress: false
     env:
       JOB: ${{ needs.plan.outputs.job }}
       TILEGEN_WORKDIR: ${{ github.workspace }}/../work
       TILEGEN_BUCKET: ${{ vars.TILEGEN_BUCKET || 'suyana-dev-tiles' }}
-      ESCENAS: ${{ matrix.escena || inputs.escenas }}
+      ESCENAS: ${{ inputs.escenas }}
       AWS_DEFAULT_REGION: us-east-1
       PYTHONUNBUFFERED: '1'
     steps:
