@@ -140,6 +140,42 @@ def plan(config_dir, dataset, variables, start, end, bbox, scene_names, fmt,
             click.echo(f"  ... and {len(pl.granules) - 8} more")
 
 
+def _pedir_una_vez(trabajos):
+    """Un solo pedido por (variable, mes) para TODAS las escenas de la corrida.
+
+    Cada escena saca sus días pendientes de su propio ledger, así que si una
+    está más atrasada que la anterior vuelve a disparar el mismo mes con más
+    días: el caché del source sólo reusa el archivo cuando los días que hacen
+    falta ya están adentro. Con ``cds_fetch_area`` el archivo es el mismo para
+    todas, así que conviene juntar los días de todas las escenas y pedirlos de
+    entrada. Cada pedido al CDS puede esperar horas en la cola, y la corrida
+    tiene un tope de tiempo: los pedidos de más son los que la cortan.
+
+    Si algo falla acá no se corta nada: el loop por escena lo vuelve a intentar
+    y ahí sí anota el resultado en el ledger.
+    """
+    if not trabajos:
+        return
+    src = trabajos[0][0].source
+    if not getattr(src, "shared_downloads", False):
+        return
+    dias = {}
+    for _, pl in trabajos:
+        for v, pendientes in pl.missing.items():
+            if pendientes:
+                dias.setdefault(v, set()).update(pendientes)
+    granulos = [g for v in sorted(dias) for g in src.granules([v], sorted(dias[v]))]
+    if not granulos:
+        return
+    click.echo(f"ventana compartida: {len(granulos)} pedido(s) al origen "
+               f"para {len(trabajos)} escena(s)")
+    for g in granulos:
+        try:
+            src.fetch(g)
+        except Exception as exc:                      # noqa: BLE001
+            click.echo(f"  no se pudo adelantar {g.key}: {exc}", err=True)
+
+
 @cli.command()
 @_common
 @click.option("--keep-local", is_flag=True, help="Keep downloaded source files in the workdir.")
@@ -148,6 +184,7 @@ def run(config_dir, dataset, variables, start, end, bbox, scene_names, fmt,
         local_only, overwrite, retry_missing, workers, keep_local, source):
     """Fetch, process and upload everything missing in the requested range."""
     failed = 0
+    trabajos = []
     for p in _build(config_dir, dataset, bbox, scene_names, fmt, local_only,
                     overwrite, workers, keep_local=True if keep_local else None,
                     source=source, retry_missing=retry_missing):
@@ -155,6 +192,11 @@ def run(config_dir, dataset, variables, start, end, bbox, scene_names, fmt,
                     end.date() if end else None)
         tag = f"[{p.scene}] " if hasattr(p, "scene") else ""
         click.echo(tag + pl.summary)
+        trabajos.append((p, pl))
+    # se planifica todo primero para poder pedir los días de una sola vez
+    _pedir_una_vez(trabajos)
+    for p, pl in trabajos:
+        tag = f"[{p.scene}] " if hasattr(p, "scene") else ""
         if not pl.granules:
             click.echo(tag + "nothing to do")
             continue
