@@ -108,3 +108,69 @@ def test_un_granulo_por_mes_no_por_dia(tmp_path):
     assert len(gs) == 3, [g.key for g in gs]
     assert [g.key for g in gs] == [
         "era5:fg10_max:1995-06", "era5:fg10_max:1995-07", "era5:fg10_max:1995-08"]
+
+
+# --- un solo pedido por mes para toda la corrida --------------------------
+
+class _PlanFalso:
+    def __init__(self, missing):
+        self.missing = missing
+
+
+class _TuboFalso:
+    def __init__(self, src, scene):
+        self.source = src
+        self.scene = scene
+
+
+class _SourceFalso:
+    """Cuenta los pedidos: lo que importa es cuántos, y con qué días."""
+    shared_downloads = True
+
+    def __init__(self):
+        self.pedidos = []
+
+    def granules(self, variables, dates):
+        from tilegen.sources.era5 import Era5CdsSource
+        return Era5CdsSource.granules(self, variables, dates)
+
+    cfg = type("c", (), {"name": "era5"})()
+
+    def fetch(self, granule):
+        self.pedidos.append((granule.variable, granule.dates))
+
+
+def _dias(*n):
+    return [dt.date(2026, 10, d) for d in n]
+
+
+def test_los_dias_de_todas_las_escenas_se_piden_de_una_sola_vez():
+    """Dos escenas con distinto atraso tienen que dar UN pedido, no dos.
+
+    Es el caso que cortaba la corrida: mexico_norte pedía snowc_mean con 2
+    días y mexico_sur volvía a pedir el mismo mes con 8, y cada pedido espera
+    horas en la cola del CDS.
+    """
+    from tilegen.cli import _pedir_una_vez
+
+    src = _SourceFalso()
+    trabajos = [
+        (_TuboFalso(src, "mexico_norte"), _PlanFalso({"snowc_mean": _dias(1, 2)})),
+        (_TuboFalso(src, "mexico_sur"), _PlanFalso({"snowc_mean": _dias(1, 2, 3, 4, 5, 6, 7, 8)})),
+    ]
+    _pedir_una_vez(trabajos)
+
+    assert len(src.pedidos) == 1
+    variable, dias = src.pedidos[0]
+    assert variable == "snowc_mean"
+    assert dias == _dias(1, 2, 3, 4, 5, 6, 7, 8)
+
+
+def test_sin_ventana_compartida_no_se_adelanta_nada():
+    """Sin cds_fetch_area cada escena baja su propia ventana: no hay nada que juntar."""
+    from tilegen.cli import _pedir_una_vez
+
+    src = _SourceFalso()
+    src.shared_downloads = False
+    _pedir_una_vez([(_TuboFalso(src, "peru"), _PlanFalso({"snowc_mean": _dias(1)}))])
+    assert src.pedidos == []
