@@ -8,8 +8,8 @@ end: 2016-12-31
 nodata: -9999
 variables:
   tmax:
-    url: "https://data.chc.ucsb.edu/products/CHIRTSdaily/v1.0/global_tifs_p05/Tmax/{year}/Tmax.{year}.{month:02d}.{day:02d}.tif"
+    url: "https://data.chc.ucsb.edu/products/CHIRTS/daily/v1.0/global_tifs_p05/Tmax/{year}/Tmax.{year}.{month:02d}.{day:02d}.tif"
     units: degC
   tmin:
-    url: "https://data.chc.ucsb.edu/products/CHIRTSdaily/v1.0/global_tifs_p05/Tmin/{year}/Tmin.{year}.{month:02d}.{day:02d}.tif"
+    url: "https://data.chc.ucsb.edu/products/CHIRTS/daily/v1.0/global_tifs_p05/Tmin/{year}/Tmin.{year}.{month:02d}.{day:02d}.tif"
     units: degC
