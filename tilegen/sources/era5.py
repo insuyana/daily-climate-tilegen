@@ -59,9 +59,12 @@ def _dates_in(path):
 def _desempacar(path):
     """Los .nc que trae el archivo del CDS: uno solo, o varios si vino zipeado.
 
-    Cuando el pedido lleva varias variables el CDS a veces las manda en un zip
-    con un .nc por variable, y otras veces en un único .nc con todo adentro.
-    Las dos formas se ven igual acá: una lista de archivos para mirar.
+    Medido el 2026-11-03 contra el CDS: un pedido de dos variables vuelve como
+    zip con un .nc por variable (`snow_depth_..._daily-mean.nc`,
+    `snow_density_..._daily-mean.nc`), cada uno con una sola variable adentro y
+    con su nombre corto (`sd`, `rsn`). Igual se contempla el .nc suelto con
+    todo junto, que es como viene un pedido de una sola variable: las dos
+    formas se ven igual acá, una lista de archivos para mirar.
     """
     with open(path, "rb") as f:
         if f.read(2) != b"PK":

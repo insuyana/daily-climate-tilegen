@@ -197,3 +197,41 @@ def test_el_yaml_real_tiene_el_nombre_corto_de_cada_variable():
                   if getattr(c, "daily_statistic", None)
                   and not getattr(c, "cds_short_name", None)]
     assert sin_nombre == [], f"les falta cds_short_name: {sin_nombre}"
+
+
+def test_la_forma_real_del_cds_es_un_zip_con_un_nc_por_variable(tmp_path, monkeypatch):
+    """Medido el 2026-11-03: un pedido de dos variables vuelve zipeado.
+
+    Adentro hay un .nc por variable, con nombres armados a partir del nombre
+    largo (`snow_depth_stream-oper_daily-mean.nc`) y una sola variable adentro,
+    con el nombre corto. Por eso el reparto busca por el contenido y no por el
+    nombre del archivo, que trae partes que no controlamos.
+    """
+    import zipfile
+
+    src = _src(tmp_path)
+
+    def falso(request, destino, etiqueta, y, m, days):
+        tmp = destino.with_suffix(".part.nc")
+        sueltos = []
+        for nombre, corto in (("snow_depth_stream-oper_daily-mean.nc", "sd"),
+                              ("snow_density_0_daily-mean.nc", "rsn")):
+            pieza = tmp_path / nombre
+            _netcdf_falso(pieza, [corto])
+            sueltos.append(pieza)
+        with zipfile.ZipFile(tmp, "w") as z:
+            for pieza in sueltos:
+                z.write(pieza, pieza.name)
+                pieza.unlink()
+        return tmp
+
+    monkeypatch.setattr(src, "_bajar", falso)
+    tag = "_-170_-57_-32_35"
+    src._retrieve_juntas(["sd_mean", "rsn_mean"], 2026, 10, _dias(1, 2), VENTANA, tag)
+
+    for v, corto in (("sd_mean", "sd"), ("rsn_mean", "rsn")):
+        destino = src._target(v, 2026, 10, tag)
+        assert destino.exists(), f"falta el archivo de {v}"
+        with xr.open_dataset(destino) as ds:
+            assert list(ds.data_vars) == [corto]
+    assert not list(tmp_path.glob("*juntas*"))
