@@ -32,7 +32,6 @@ on:
     - cron: '0 5 * * *'    # cpc
     - cron: '0 6 * * *'    # chirps
     - cron: '30 6 * * *'   # era5
-    - cron: '0 9 * * 0'    # era5-swvl1
     - cron: '30 9 * * *'   # chirps-v3
     - cron: '30 10 * * *'  # era5-land
     - cron: '0 12 * * *'   # cobertura
@@ -41,7 +40,7 @@ on:
       job:
         description: Qué job correr
         type: choice
-        options: [cpc, chirps, era5, era5-swvl1, chirps-v3, era5-land, cobertura]
+        options: [cpc, chirps, era5, chirps-v3, era5-land, cobertura]
       escenas:
         description: Solo estas escenas, separadas por espacio (vacío = las de siempre)
         type: string
@@ -73,7 +72,6 @@ jobs:
             '0 5 * * *')   job=cpc ;;
             '0 6 * * *')   job=chirps ;;
             '30 6 * * *')  job=era5 ;;
-            '0 9 * * 0')   job=era5-swvl1 ;;
             '30 9 * * *')  job=chirps-v3 ;;
             '30 10 * * *') job=era5-land ;;
             '0 12 * * *')  job=cobertura ;;
@@ -163,7 +161,6 @@ jobs:
             cpc)        tilegen run -d cpc $(x $TIERRA) $(desde 45) ;;
             chirps)     tilegen run -d chirps $(x $TIERRA) $(desde 70) ;;
             era5)       tilegen run -d era5 $ERA5_VARS $(x $TODAS) $(desde 16) ;;
-            era5-swvl1) tilegen run -d era5 --source era5_edh -v swvl1 $(x $TODAS) $(desde 90) ;;
             chirps-v3)  tilegen run -d chirps-v3 $(x $TIERRA) $(desde 70) ;;
             era5-land)  tilegen run -d era5-land $(x $TIERRA) $(desde 120) ;;
             cobertura)  python deploy/publicar_docs.py ;;
