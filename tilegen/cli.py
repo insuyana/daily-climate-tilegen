@@ -151,6 +151,11 @@ def _pedir_una_vez(trabajos):
     entrada. Cada pedido al CDS puede esperar horas en la cola, y la corrida
     tiene un tope de tiempo: los pedidos de más son los que la cortan.
 
+    Además, el origen decide qué variables entran en la misma llamada
+    (``grupos_de_pedido``): el CDS cobra por turno en la cola y no por tamaño,
+    así que pedir ocho variables de a una cuesta ocho esperas y pedirlas de a
+    grupos cuesta menos.
+
     Si algo falla acá no se corta nada: el loop por escena lo vuelve a intentar
     y ahí sí anota el resultado en el ledger.
     """
@@ -164,7 +169,8 @@ def _pedir_una_vez(trabajos):
         for v, pendientes in pl.missing.items():
             if pendientes:
                 dias.setdefault(v, set()).update(pendientes)
-    granulos = [g for v in sorted(dias) for g in src.granules([v], sorted(dias[v]))]
+    granulos = [g for vs, fechas in src.grupos_de_pedido(dias)
+                for g in src.granules(vs, fechas)]
     if not granulos:
         return
     click.echo(f"ventana compartida: {len(granulos)} pedido(s) al origen "

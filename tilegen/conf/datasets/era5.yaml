@@ -20,17 +20,26 @@ cds_product_type: reanalysis
 # Cuesta ~25 MB por mes (5x menos que pedir global) -> ~10 GB por un backfill
 # de 380 meses, que después se pueden podar de .work/downloads/era5/.
 cds_fetch_area: [-170, -57, -32, 35]
+#
+# Por la misma razón, las variables que comparten `daily_statistic` se piden en
+# UNA sola llamada: un turno en la cola trae tres variables en vez de una. Eso
+# es lo que hace falta `cds_short_name`, que es cómo se llama cada una adentro
+# del NetCDF que vuelve; sin ese dato no se podría partir el archivo y la
+# variable se pide sola. Los valores salen de mirar archivos ya bajados, no de
+# adivinar: verificados el 2026-11-03 contra .work/downloads/era5/.
 edh_store: https://api.earthdatahub.destine.eu/era5/era5-single-levels-atmosphere-daily-utc-v0.zarr
 edh_hourly_store: https://api.earthdatahub.destine.eu/era5/era5-single-levels-atmosphere-v0.zarr
 variables:
   t2m_mean:
     cds_variable: 2m_temperature
     daily_statistic: daily_mean
+    cds_short_name: t2m
     edh_variable: t2m
     units: K
   t2m_max:
     cds_variable: 2m_temperature
     daily_statistic: daily_maximum
+    cds_short_name: t2m
     # daily EDH store has no maxima -> aggregate the hourly store locally
     edh_hourly_variable: t2m
     edh_hourly_statistic: max
@@ -43,12 +52,14 @@ variables:
     # igual que la máxima.
     cds_variable: 2m_temperature
     daily_statistic: daily_minimum
+    cds_short_name: t2m
     edh_hourly_variable: t2m
     edh_hourly_statistic: min
     units: K
   precip_sum:
     cds_variable: total_precipitation
     daily_statistic: daily_sum
+    cds_short_name: tp
     # daily EDH store has no accumulated vars -> aggregate the hourly store locally
     edh_hourly_variable: tp
     edh_hourly_statistic: sum
@@ -60,6 +71,7 @@ variables:
     # Summing the real days is exact, so no days-in-month factor is needed.
     cds_variable: surface_solar_radiation_downwards
     daily_statistic: daily_sum
+    cds_short_name: ssrd
     # daily EDH store has no accumulated vars -> aggregate the hourly store locally
     edh_hourly_variable: ssrd
     edh_hourly_statistic: sum
@@ -79,6 +91,7 @@ variables:
     # ruta con cola -> el histórico es caro, ver .work/backfill_fg10.sh.
     cds_variable: 10m_wind_gust_since_previous_post_processing
     daily_statistic: daily_maximum
+    cds_short_name: fg10
     units: m s-1
   swvl1:
     # volumetric soil water layer 1 (soil moisture, 0-7cm). Only in the hourly
@@ -109,6 +122,7 @@ variables:
     # t2m_mean, y a diferencia de precip_sum.
     cds_variable: snow_depth
     daily_statistic: daily_mean
+    cds_short_name: sd
     # el store diario de EDH ya la trae promediada -> backfill barato (1 valor
     # por día en vez de leer 24 horas), como t2m_mean.
     edh_variable: sd
@@ -122,6 +136,7 @@ variables:
     # store horario promediando las 24 horas localmente.
     cds_variable: snow_density
     daily_statistic: daily_mean
+    cds_short_name: rsn
     edh_hourly_variable: rsn
     edh_hourly_statistic: mean
     units: kg m-3
