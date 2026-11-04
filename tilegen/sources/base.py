@@ -21,6 +21,10 @@ class Granule:
     key: str                 # human-readable id, e.g. "chirps:precip:2024-01-15"
     variable: str
     dates: list
+    #: Las variables que viajan en el MISMO pedido al origen, esta incluida.
+    #: None = va sola, que es el caso de casi todas las fuentes. Sólo lo llena
+    #: quien junta varias para hacer menos pedidos (ver Era5CdsSource).
+    juntos: Optional[list] = None
 
 
 @dataclass
@@ -51,6 +55,16 @@ class DataSource(ABC):
     @abstractmethod
     def granules(self, variables: list[str], dates: list) -> list[Granule]:
         """Split the requested (variables x dates) into download units."""
+
+    def grupos_de_pedido(self, dias: dict) -> list[tuple[list[str], list]]:
+        """Cómo repartir {variable: días pendientes} en llamadas al origen.
+
+        Por defecto cada variable va sola, que es lo que hacen las fuentes
+        donde un pedido cuesta lo que pesa. Una fuente con cola, donde el
+        costo es la CANTIDAD de pedidos, puede juntar varias en la misma
+        llamada (ver Era5CdsSource.grupos_de_pedido).
+        """
+        return [([v], sorted(ds_)) for v, ds_ in sorted(dias.items())]
 
     @abstractmethod
     def fetch(self, granule: Granule) -> list[Asset]:

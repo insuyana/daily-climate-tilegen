@@ -134,6 +134,10 @@ class _SourceFalso:
         from tilegen.sources.era5 import Era5CdsSource
         return Era5CdsSource.granules(self, variables, dates)
 
+    def grupos_de_pedido(self, dias):
+        from tilegen.sources.base import DataSource
+        return DataSource.grupos_de_pedido(self, dias)
+
     cfg = type("c", (), {"name": "era5"})()
 
     def fetch(self, granule):
