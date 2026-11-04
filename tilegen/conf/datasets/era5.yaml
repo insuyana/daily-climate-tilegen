@@ -85,6 +85,17 @@ variables:
     # EDH store -> daily MEAN aggregated locally. No cds_variable on purpose:
     # the daily cron (era5_cds) lists the atmospheric vars explicitly and skips
     # this one; swvl1 rides the EDH mirror's monthly updates.
+    #
+    # CONGELADA desde el 2026-11-03: el job semanal `era5-swvl1` salió del
+    # workflow. EDH bloquea las IP de GitHub Actions y devuelve 403 aun sin
+    # credenciales, así que esa variable no se puede actualizar desde ahí.
+    # El cubo conserva todo lo que ya bajó (1981 -> 2026-10-15) y se sigue
+    # leyendo igual; lo único que no hace es crecer.
+    # La humedad de suelo viva es `swvl1` de era5-land, a 0.1° y por CDS,
+    # que entra con el job diario de ese dataset.
+    # Para retomarla hay que correrla a mano desde una máquina que EDH deje
+    # entrar (el server), o pedirle al CDS la variable
+    # volumetric_soil_water_layer_1 agregando aca un cds_variable.
     edh_hourly_variable: swvl1
     edh_hourly_statistic: mean
     units: m3 m-3
