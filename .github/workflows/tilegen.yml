@@ -42,7 +42,7 @@ on:
         description: Qué job correr
         type: choice
         options: [cpc, chirps, era5, era5-swvl1, chirps-v3, era5-land, cobertura]
-      escenas:
+      scenes:
         description: Solo estas escenas, separadas por espacio (vacío = las de siempre)
         type: string
         required: false
@@ -97,7 +97,7 @@ jobs:
       JOB: ${{ needs.plan.outputs.job }}
       TILEGEN_WORKDIR: ${{ github.workspace }}/../work
       TILEGEN_BUCKET: ${{ vars.TILEGEN_BUCKET || 'suyana-dev-tiles' }}
-      ESCENAS: ${{ inputs.escenas }}
+      SCENES: ${{ inputs.scenes }}
       AWS_DEFAULT_REGION: us-east-1
       PYTHONUNBUFFERED: '1'
     steps:
@@ -126,11 +126,11 @@ jobs:
         with:
           python-version: '3.12'   # zarr 3: los stores de EDH son Zarr v3
           cache: pip
-          cache-dependency-path: deploy/requirements-lock.txt
+          cache-dependency-path: requirements.txt
 
       - name: Instalar tilegen
         run: |
-          pip install -r deploy/requirements-lock.txt
+          pip install -r requirements.txt
           pip install --no-deps .
 
       - name: Credenciales de las fuentes
@@ -142,33 +142,10 @@ jobs:
           printf '%s\n' "$NETRC" > ~/.netrc
           chmod 600 ~/.cdsapirc ~/.netrc
 
+      # La lógica de cada job (escenas, variables, ventana de días) vive en
+      # tilegen/runner.py; `python -m tilegen.runner --help` la describe.
       - name: tilegen
-        run: |
-          TIERRA="mexico_norte mexico_sur centroamerica antillas_mayores
-            antillas_menores colombia venezuela guayanas ecuador_galapagos
-            peru bolivia brasil_amazonia brasil_nordeste brasil_centro_sudeste
-            brasil_sur paraguay uruguay chile_norte_centro argentina_norte patagonia"
-          TODAS="$TIERRA nino34"
-          # Prueba a mano sobre pocas escenas: reemplaza las dos listas.
-          if [ -n "$ESCENAS" ]; then TIERRA="$ESCENAS"; TODAS="$ESCENAS"; fi
-          x() { for e in "$@"; do printf -- '-x %s ' "$e"; done; }
-          desde() { echo "-s $(date -u -d "-$1 days" +%F)"; }
-          ERA5_VARS="-v t2m_mean -v t2m_max -v t2m_min -v precip_sum -v ssrd_sum -v sd_mean -v rsn_mean -v fg10_max"
-          # era5 va en un solo job: con cds_fetch_area todas las escenas usan
-          # la misma descarga, y en 3 grupos le pedíamos lo mismo 3 veces al
-          # CDS (24 pedidos por día en vez de 8), que nos rechaza cuando
-          # tenemos muchos en la fila.
-
-          case "$JOB" in
-            cpc)        tilegen run -d cpc $(x $TIERRA) $(desde 45) ;;
-            chirps)     tilegen run -d chirps $(x $TIERRA) $(desde 70) ;;
-            era5)       tilegen run -d era5 $ERA5_VARS $(x $TODAS) $(desde 16) ;;
-            era5-swvl1) tilegen run -d era5 --source era5_edh -v swvl1 $(x $TODAS) $(desde 90) ;;
-            chirps-v3)  tilegen run -d chirps-v3 $(x $TIERRA) $(desde 70) ;;
-            era5-land)  tilegen run -d era5-land $(x $TIERRA) $(desde 120) ;;
-            cobertura)  python deploy/publicar_docs.py ;;
-            *) echo "job desconocido: $JOB"; exit 1 ;;
-          esac
+        run: python -m tilegen.runner --job "$JOB" ${SCENES:+--scenes $SCENES}
 
       # También cuando el job se corta: al llegar a timeout-minutes GitHub lo
       # cancela y eso no cuenta como failure(), así que antes no avisaba.

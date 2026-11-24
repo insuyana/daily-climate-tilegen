@@ -15,3 +15,31 @@ deploy/airflow/logs/
 
 # Logs sueltos de corridas a mano
 logs/
+
+# Entornos virtuales, cachés de herramientas e instalaciones locales
+.venv*/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# Credenciales (el repo es público): nunca van al repo, se pasan como secretos
+.env
+.env.*
+!.env.example
+.cdsapirc
+.netrc
+*.pem
+
+# Datos bajados o generados a mano (los cubos viven en S3)
+*.nc
+*.tif
+*.tif.part
+*.zarr/
+*.grib
+
+# Editor y sistema
+.vscode/
+.idea/
+.DS_Store

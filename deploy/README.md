@@ -8,7 +8,7 @@ cada tarea, y puede relanzar con un clic.
 ```
 deploy/
   Dockerfile               imagen tilegen:<tag> (Python 3.12, zarr 3)
-  requirements-lock.txt    versiones exactas de la imagen
+  ../requirements.txt      (en la raíz) versiones exactas de la imagen
   publicar_docs.py         cobertura + catálogo -> bucket (antes .work/cobertura-run.sh)
   airflow/
     docker-compose.yml     Airflow 3 (LocalExecutor + Postgres)

@@ -1,7 +1,7 @@
 # Global settings for the tile generation pipeline.
 
 s3:
-  bucket: suyana-tiles
+  bucket: suyana-dev-tiles
   prefix: ""            # optional key prefix inside the bucket
   region: us-east-1
 
@@ -25,7 +25,8 @@ grid:
   tile_size_deg: 10     # MERIT/GHSL-style fixed grid; tiles named by lower-left corner (s20w080)
 
 runtime:
-  workdir: /home/jupyter-daniela/tile_generation_module/.work
+  # workdir (downloads, staging, --local-only output): default .work under the current
+  # directory (git-ignored). TILEGEN_WORKDIR overrides it; the runner uses a temp dir.
   workers: 6            # parallel granule downloads (HTTP sources only)
   keep_local: false     # keep downloaded source files after tiling
 

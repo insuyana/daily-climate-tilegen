@@ -1,0 +1,15 @@
+name: chirts
+version: experimental
+description: CHIRTS ERA5 — quasi-global (60S-70N), 0.05° that combines CHC CHIRTS with ECMWF ERA5 for 2m temperature.
+source: ftp_geotiff
+temporal: daily
+start: 1981-01-01
+lag_days: 45
+nodata: -9999
+variables:
+  tmax:
+    url: "ftp://data.chc.ucsb.edu/experimental/CHIRTS-ERA5/tmax/tifs/daily/{year}/CHIRTS-ERA5.daily_Tmax.{year}.{month:02d}.{day:02d}.tif"
+    units: degC
+  tmin:
+    url: "ftp://data.chc.ucsb.edu/experimental/CHIRTS-ERA5/tmin/tifs/daily/{year}/CHIRTS-ERA5.daily_Tmin.{year}.{month:02d}.{day:02d}.tif"
+    units: degC

@@ -48,6 +48,15 @@ class DataSource(ABC):
         self.workdir = workdir
         workdir.mkdir(parents=True, exist_ok=True)
 
+    def share_between_scenes(self) -> None:
+        """Llamado cuando la corrida tiene más de una escena. Una fuente cuyo
+        archivo es global (el mismo para todas) lo activa: baja una vez y cada
+        escena recorta del disco. Por defecto no hace nada."""
+
+    def release(self) -> None:
+        """Llamado al terminar la corrida: borra lo que quedó guardado para las
+        escenas siguientes (ver ``shared_downloads``). Por defecto no hace nada."""
+
     @abstractmethod
     def granules(self, variables: list[str], dates: list) -> list[Granule]:
         """Split the requested (variables x dates) into download units."""

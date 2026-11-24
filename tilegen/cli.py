@@ -172,6 +172,8 @@ def _pedir_una_vez(trabajos):
     for g in granulos:
         try:
             src.fetch(g)
+        except FileNotFoundError:
+            pass          # todavía no publicado: cada escena lo registra en su ledger
         except Exception as exc:                      # noqa: BLE001
             click.echo(f"  no se pudo adelantar {g.key}: {exc}", err=True)
 
@@ -185,24 +187,32 @@ def run(config_dir, dataset, variables, start, end, bbox, scene_names, fmt,
     """Fetch, process and upload everything missing in the requested range."""
     failed = 0
     trabajos = []
-    for p in _build(config_dir, dataset, bbox, scene_names, fmt, local_only,
-                    overwrite, workers, keep_local=True if keep_local else None,
-                    source=source, retry_missing=retry_missing):
+    pipelines = _build(config_dir, dataset, bbox, scene_names, fmt, local_only,
+                       overwrite, workers, keep_local=True if keep_local else None,
+                       source=source, retry_missing=retry_missing)
+    if len(pipelines) > 1:  # una sola escena: bajar y recortar directo, sin guardar nada
+        for p in pipelines:
+            p.source.share_between_scenes()
+    for p in pipelines:
         pl = p.plan(variables or None, start.date() if start else None,
                     end.date() if end else None)
         tag = f"[{p.scene}] " if hasattr(p, "scene") else ""
         click.echo(tag + pl.summary)
         trabajos.append((p, pl))
     # se planifica todo primero para poder pedir los días de una sola vez
-    _pedir_una_vez(trabajos)
-    for p, pl in trabajos:
-        tag = f"[{p.scene}] " if hasattr(p, "scene") else ""
-        if not pl.granules:
-            click.echo(tag + "nothing to do")
-            continue
-        summary = p.run(pl)
-        click.echo(json.dumps(summary, indent=2, default=str))
-        failed += summary["stats"]["errors"]
+    try:
+        _pedir_una_vez(trabajos)
+        for p, pl in trabajos:
+            tag = f"[{p.scene}] " if hasattr(p, "scene") else ""
+            if not pl.granules:
+                click.echo(tag + "nothing to do")
+                continue
+            summary = p.run(pl)
+            click.echo(json.dumps(summary, indent=2, default=str))
+            failed += summary["stats"]["errors"]
+    finally:
+        if trabajos and not keep_local:
+            trabajos[0][0].source.release()
     if failed:
         raise SystemExit(1)
 
